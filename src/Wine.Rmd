@@ -1,0 +1,533 @@
+---
+title: "Práctica 2: Clasificación vino Blanco"
+date: "31 de diciembre 2020"
+author: "Autores: Jorge Miranda Álamo y José Manuel García Rodes"
+output:
+  pdf_document:
+    highlight: zenburn
+    toc: yes
+  html_document:
+    highlight: default
+    number_sections: yes
+    theme: cosmo
+    toc: yes
+    toc_depth: 4
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Descripción de las variables contenidas en el fichero
+
+A partir del conjunto de datos* disponible en el siguiente enlace https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-white.csv, vamos a realizar un modelo de agregación no supervisado y un modelo de regresión, para clasificar el vino blanco según su calidad, basandonos en los valores aportados por una serie de mediciones fisioquímicas (entradas) y sensoriales (salidas). También vamos a realizar diferentes contrastes de hiótesis para ver si existen diferencias estadísticas entres las medias para los diferentes atributos para los vinos de calidad Alta y de calidad Baja.
+
+\* Para más información sobre los datos se puede visitar el siguiente enlace:
+https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality.names
+
+\*P. Cortez, A. Cerdeira, F. Almeida, T. Matos and J. Reis.
+Modeling wine preferences by data mining from physicochemical properties. In Decision Support Systems, Elsevier, 47(4):547-553, 2009.
+
+El fichero en estudio está formado por las siguientes 12 variables:
+
+Variables de entrada (basadas en pruebas fisicoquímicas):
+
+* **fixed acidity**. *acidez fija:* Continua.
+* **volatile acidity**. *acidez volátil:* Continua.
+* **citric acid**. *ácido cítrico:* Continua.
+* **residual sugar**. *azúcar residual:* Continua.
+* **chlorides**. *cloruros:* continuous.
+* **free sulfur dioxide**. *dióxido de azufre libre*: Continua.
+* **total sulfur dioxide**. *dióxido de azufre total:* Continua.
+* **density**. *densidad:* Continua.
+* **pH**. *pH:* Continua.
+* **sulphates**. *sulfatos:* Continua.
+* **alcohol**. *alcohol:* Continua.
+
+Variable de salida (basada en datos sensoriales):
+
+* **quality **. *calidad:* Discreta. Esta variable puede tomar valores entre 0 y 10. 
+
+# Carga del conjunto de datos
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Cargamos los paquetes R que vamos a usar
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(cluster)
+
+# Establecemos el directorio de trabajo
+setwd("./")
+
+url <- "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-white.csv"
+winequality <- read.csv(url,stringsAsFactors = FALSE, header =TRUE, sep =";" )
+
+```
+
+# Procesos de limpieza del conjunto de datos
+
+Primer contacto con el conjunto de datos, visualizamos su estructura.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+str(winequality)
+```
+
+
+
+## Estadísticas básicas.
+Pasamos a estudiar las estadisticas básicas del conjunto de datos
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+summary(winequality)
+```
+
+Tras un primer análisis básico del conjunto de datos, cabe destacar los distintos rangos que toman las variables, siendo todos positivos pero muy dispares, por lo que sugiere la posibilidad de realizar una normalización de los datos.
+
+## Trabajamos los atributos con valores vacíos.
+
+Pasamos a comprobar si existen valores vacios o nulos
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+colSums(is.na(winequality))
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+colSums(winequality=="")
+```
+
+Como podemos apreciar, no existen valores perdidos.
+
+## Valores extremos
+
+Los valores extremos (extreme scores o outliers) son aquellos datos que se encuentran muy alejados de la distribución normal de una variable o población.
+
+Para detectarlos utilizaremos la ténica de la representación de los datos mediante gráficos de cajas (boxplots), con el objetivo de detectar dichos outliers viendo los valores que distan mucho de la media. Esto sólo es válido para atributos numéricos.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality %>%
+  gather(atributos, valores) %>%
+  ggplot() +
+  aes(y=valores, fill=atributos) +
+  geom_boxplot(outlier.colour="black", outlier.shape=16, outlier.size=2, notch=FALSE) +
+  theme(legend.position="none") + # Remove legend
+  facet_wrap(~atributos, scales="free_y") +
+  labs(y="Valores", title="Atributos del vino - Gráfico de cajas")
+```
+
+Vamos a investigar que puntos están muy alejados de del tercer cuartil y del primer cuartil. Para las variables *citric.acid*, *density*, *fixed.acidity*, *free.sulfur.dioxide*, *quality*,*residual.sugar* y *total.sulfur.dioxide* tenemos valores aislados que se alejan del tercer cuartil por la parte superior, y para *quality* y *total.sulfur.dioxide* hay valores que se alejan por la parte inferior. 
+
+Mostramos los valores que se alejan más de dos desviaciones típicas de la media.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+boxplot.stats(winequality$citric.acid)$out
+boxplot.stats(winequality$density)$out
+boxplot.stats(winequality$fixed.acidity)$out
+boxplot.stats(winequality$free.sulfur.dioxide)$out
+boxplot.stats(winequality$quality)$out
+boxplot.stats(winequality$residual.sugar)$out
+boxplot.stats(winequality$total.sulfur.dioxide)$out
+boxplot.stats(winequality$total.sulfur.dioxide)$out
+```
+
+
+Estudiamos con más detenimiento los valores más alejados del rango intercuartílico, ordeno de forma descendente el conjunto de datos para cada una de las variables con posibles outliers superiores y ascendente para las variables con posibles outliers inferiores, mostrando las 5 primeras filas. De esta forma podemos comporbar que son valores aislados y no varios valores juntos que el el gráfico apararecen representados por un único punto.
+
+Ordenación ascendente
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+winequality <- arrange(winequality, -citric.acid)
+head(winequality$citric.acid, n=5)
+
+winequality <- arrange(winequality, -density)
+head(winequality$density, n=5)
+
+winequality <- arrange(winequality, -fixed.acidity)
+head(winequality$fixed.acidity, n=5)
+
+winequality <- arrange(winequality, -free.sulfur.dioxide)
+head(winequality$free.sulfur.dioxide, n=5)
+
+winequality <- arrange(winequality, -quality)
+head(winequality$quality, n=5)
+
+winequality <- arrange(winequality, -residual.sugar)
+head(winequality$residual.sugar, n=5)
+
+winequality <- arrange(winequality, -total.sulfur.dioxide)
+head(winequality$total.sulfur.dioxide, n=5)
+```
+
+Ordenación descendene
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality <- arrange(winequality, quality)
+head(winequality$quality, n=5)
+
+winequality <- arrange(winequality, total.sulfur.dioxide)
+head(winequality$total.sulfur.dioxide, n=5)
+
+```
+
+A la vista de estos resultados, podemos concluir que son todos valores únicos en los extremos superiores excepto para la variable *quality* que hay varios valores representados por el mismo punto al igual que por la parte inferior.
+
+Para *total.sulfur.dioxide*, como son varios los valores que se escapan por la parte inferior, estos no los vamos a eliminar. Vamos a eliminar las observaciones correspondientes a los outlaiers superiores.
+
+Elimino los valores únicos de los extremos superiores.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality <- winequality[-which.max(winequality$citric.acid),]
+winequality <- winequality[-which.max(winequality$density),]
+winequality <- winequality[-which.max(winequality$fixed.acidity),]
+winequality <- winequality[-which.max(winequality$free.sulfur.dioxide),]
+winequality <- winequality[-which.max(winequality$residual.sugar),]
+winequality <- winequality[-which.max(winequality$total.sulfur.dioxide),]
+
+```
+
+Despues de eliminar estos valores aislados y alejados del resto del grupo, habría que ver que hacemos con los siguientes valores alejados del grupo. LLegados a este punto, sería importante tener la opinión de un experto que nos dijera si son observaciones anómalas que podrían deberse a un error de medida o efectivamente son valores que están dentro de un rango posible.
+
+## Discretizaión de variables
+
+Vamos a discretizar la variable *quality*. Para ello añadimos una variable nueva a los datos que se llamará *quality_disc*.
+
+Vemos como se distribuyen os valores:
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+# Vemos cómo se distribuyen los valores
+summary(winequality[,"quality"])
+table(winequality$quality)
+
+```
+
+Tras estudiar sus distribuciones de frecuencias, discretizamos agrupando en tres intervalos, estando formado el intervalo central solo por valor "6", ya que éste es el valor de la calidad que agrupa cerca del 45 % de las observaciones. Los otros dos intervalos estarán formados por los valores de la calidad por encima y por debajo de éste respectivamente.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality["quality_disc"] <- cut(winequality$"quality", breaks = c(0,5,6,9), labels = c("Baja", "Media", "Alta"))
+```
+
+
+Comparamos la distribución de la variable ***quality*** con ***quality_disc***, mediante su representación gráfica.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+df_quality <- winequality[,12:13]
+
+df_quality %>%
+  gather(atributos, valores) %>%
+  ggplot() +
+  aes(x=valores, fill=atributos) +
+  geom_bar(colour="black", show.legend=FALSE) +
+  facet_wrap(~atributos, scales="free_x") +
+  labs(x="Valores", y="Frecuencia",
+       title="Calidad del vino blanco - Histograma")
+```
+
+El gráfico ***quality_disc*** nos indica un ligero desbalanzeamiento, habría que aplicar técnicas para corregirlo, pero no vamos a entrar en ello. El gráfico ***quality***, indica que apenas existen vinos blancos excelentes ni malos.
+
+## Exportación de los datos preprocesados
+
+Una vez integrados, validados y guardados los datos creamos un nuevo fichero llamado "winequality_clean.csv".
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+write.csv(winequality, "winequality_clean.csv")
+```
+
+# Análisis de los datos
+
+## Selección de los grupos de datos que se quieren analizar/comparar (planificación de los análisis a aplicar)
+
+### Estudio de la normalidad
+En función de los resultados del  test de normalidad y homegeneidad de varianza se podrán aplicar tests paramétricos o no paramétricos a nuestro conjunto de datos.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(nortest)
+alpha = 0.05
+col.names = colnames(winequality)
+for (i in 1:ncol(winequality)) {
+  if (i == 1) cat("Variables que no siguen una distribución normal:\n")
+  if (is.integer(winequality[,i]) | is.numeric(winequality[,i])) {
+    p_val = ad.test(winequality[,i])$p.value
+    if (p_val < alpha) {
+      cat(col.names[i])
+      # Format output
+      if (i < ncol(winequality) - 1) cat(", ")
+      if (i %% 3 == 0) cat("\n")
+    }
+  }
+}
+```
+
+Podemos comprobar como ninguna de las variables cuantitativas se distribuye de forma normal, por lo que sería conveniente usar métodos no paramétricos para la realizacion de los tests, pero como tenemos un dataset de 4892 observaciones también se podrán usar métodos paramétricos.
+
+### Estudio de la Homogeneidad de varianzas
+En este apartado vamos a realizar el test estadisticos de *Fligner-Killeen* para contras tar la hipótesis nula de que las varianzas son iguales o por el contratio son son distintas con un nivel de confianza del 5%.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# fixed.acidity 
+fligner.test(fixed.acidity ~ quality_disc, data = winequality)
+
+# volatile.acidity 
+fligner.test(volatile.acidity ~ quality_disc, data = winequality)
+
+# citric.acid 
+fligner.test(citric.acid ~ quality_disc, data = winequality)
+
+# residual.sugar 
+fligner.test(residual.sugar ~ quality_disc, data = winequality)
+
+# chlorides 
+fligner.test(chlorides ~ quality_disc, data = winequality)
+
+# free.sulfur.dioxide
+fligner.test(free.sulfur.dioxide ~ quality_disc, data = winequality)
+
+# total.sulfur.dioxide
+fligner.test(total.sulfur.dioxide ~ quality_disc, data = winequality)
+
+# density 
+fligner.test(density ~ quality_disc, data = winequality)
+
+# pH 
+fligner.test(pH ~ quality_disc, data = winequality)
+
+# sulphates 
+fligner.test(sulphates ~ quality_disc, data = winequality)
+
+# alcohol 
+fligner.test(alcohol ~ quality_disc, data = winequality)
+
+```
+
+Tras realizar el test de homgeneidad de varianzas a todas las variales para cada una de las categorías de *quality_disc*, podemos comprobar como han salido todos los p-value < de 0,05, por lo que rechazamos la hipótesis nula de homogeneidad de varianzas.
+
+### Reducción de la dimensionalidad
+
+En este apartado vamos a tratar de identificar variables que tienen el mismo comportamiento, para incluir a una sola en nuestro conjunto de datos y de esta forma no tener información redundante y hacer más facil la interpretación de los datos.
+
+#### Estudio de la correlación
+
+Una forma de reducir la dimensionalidad es sacar del modelo las variables que estén correlacionadas, para ello podemos calcular la matriz de correlaciones de las variables sacando del conjunto de datos la variable *quality_disc* ya que esta es una variable categórica.
+
+Cargo los datos sin la variable *quality_disc*
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+df <- winequality[,1:12]
+head(df)
+```
+
+Calculamos la matriz de correlaciones y su representación gráfica
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(corrplot)
+cor(df)
+corrplot(cor(df), type="upper", method="ellipse", tl.cex=0.9)
+```
+
+Variables a sacar del conjunto de datos:
+
+* El **alcohol** esta fuertemente correlacionado con la densidad, con un coeficiente de correlación del -0,80, lo que significa que a mayor cantidad de alcohol menor **densidad**. También está correlacionado inversamente proporcional, en menor medida, con el **azúcar residual** y con el **total de dióxido de sulfuro** con coeficientes de correlación -0,46 y -0,45 respectivamente.
+
+* El coeficiente de correlación entre el **pH** y la **acided fija** es del -0.43, aunque no es muy fuerte, lo vamos a tener en cuenta para reducir el numero de variables.
+
+* La correlación entre **densidad** y **azúcar residual** es fuerte con un coeficiente de 0,83, por lo que a mayor densidad mayor azucar residual. La **densidad** también está directamente correlacionada de forma más debil con **total de dióxido de sulfuro** (0,55), a mayor densidad mayor dioxdido de sulfuro total.
+
+* El **total de dioxido de sulfuro** esta directamente correlacionado con el **dióxido de sulfuro libre** (0,61).
+
+Por lo tanto sacamos del modelo la **densidad**, el **azúcar residual**, el **total de dióxido de sulfuro** y la **acided fija**.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+df <- select(df,-1,-4,-7,-8)
+head(df)
+```
+
+## Aplicación de pruebas estadísticas para comparar los grupos de datos. En función de los datos y el objetivo del estudio, aplicar pruebas de contraste de hipótesis, correlaciones, regresiones, etc. Aplicar al menos tres métodos de análisis diferentes
+
+### Contrastes de hipótesis
+A pesar de que los datos no se distribuyen normales y dado que tenemos más de 30 observaciones (4892), vamos a utilizar métodos paramétricos para la realización de los contrastes de hipótesis.
+
+En primer lugar vamos a contrastar la hipótesis de que los vinos con calidad **Alta** tienen más graduación alcohólica que los vinos de calidad **Baja**.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality_alta_alcohol <- winequality[winequality$quality_disc == "Alta",]$alcohol
+winequality_baja_alcohol <- winequality[winequality$quality_disc == "Baja",]$alcohol
+
+t.test(winequality_baja_alcohol, winequality_alta_alcohol, alternative = "less")
+```
+
+Del resultado del test anterior se desprende que la graduación media de alcohol de los vinos con calidad **Alta** es de 11.42 grados y la de los vinos de calidad **Baja** es de 9.85 grados, siendo la diferecia de estas medias lo suficientemente grande (desde el punto de vista estadítico) como para poder afirmar con una probabilidad del 0.95 que; **la graduación media de los vinos de calidad alta es mayor a la de los vinos de calidad baja**, dado que p-value = 2.2e-16 < 0.05.
+
+Repetimos el contraste de hipótesis para el **pH**.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality_alta_pH <- winequality[winequality$quality_disc == "Alta",]$pH
+winequality_baja_pH <- winequality[winequality$quality_disc == "Baja",]$pH
+
+t.test(winequality_baja_pH, winequality_alta_pH, alternative = "less")
+```
+
+A la vista de los resultados del test, rechazamos la hipótesis nula de que las medias del **pH** sean las mismas para los vinos de calidad alta que para los de calidad baja (p-value = 6.269e-14 < 0.05), por lo que podemos afirmar que el pH de los vinos de calidad **Alta** es mayor que los de calidad **Baja**.
+
+Repetimos el contraste de hipótesis para el **sulphates**.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality_alta_sulphates <- winequality[winequality$quality_disc == "Alta",]$sulphates
+winequality_baja_sulphates <- winequality[winequality$quality_disc == "Baja",]$sulphates
+
+t.test(winequality_baja_sulphates, winequality_alta_sulphates, alternative = "less")
+```
+
+Obtenemos un p-value = 4.288e-05, por lo que podemos afirmar que la media de **sulfitos** es mayor en los vinos de calidad **Alta** que en los de calidad **Baja**.
+
+Repetimos el contraste de hipótesis para el **free.sulfur.dioxide**.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality_alta_free.sulfur.dioxide <- winequality[winequality$quality_disc == "Alta",]$free.sulfur.dioxide
+winequality_baja_free.sulfur.dioxide <- winequality[winequality$quality_disc == "Baja",]$free.sulfur.dioxide
+
+t.test(winequality_alta_free.sulfur.dioxide, winequality_baja_free.sulfur.dioxide, alternative = "less")
+```
+
+El p-value para *free.sulfur.dioxide* es de 0.16 > que 0.05 por lo que no podemos rechazar la hipótesis nula de que las medias son iguales.
+
+Repetimos el contraste de hipótesis para el **chlorides**.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality_alta_chlorides <- winequality[winequality$quality_disc == "Alta",]$chlorides
+winequality_baja_chlorides <- winequality[winequality$quality_disc == "Baja",]$chlorides
+
+t.test(winequality_alta_chlorides, winequality_baja_chlorides, alternative = "less")
+```
+
+Rechazamos la hipótesis nula (p-value = 2.2e-16 < 0.05), los vinos de calidad **Alta** tienen menor cantidad de **chlorides** que los vinos de calidad **Baja**.
+
+Repetimos el contraste de hipótesis para el **citric.acid**.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality_alta_citric.acid <- winequality[winequality$quality_disc == "Alta",]$citric.acid
+winequality_baja_citric.acid <- winequality[winequality$quality_disc == "Baja",]$citric.acid
+
+t.test(winequality_alta_citric.acid, winequality_baja_citric.acid, alternative = "less")
+```
+
+Rechazamos la hipótesis nula (p-value = 0.02717 < 0.05), los vinos de calidad **Alta** tienen menor cantidad de **ácido cítrico** que los vinos de calidad **Baja**.
+
+Repetimos el contraste de hipótesis para el **volatile.acidity**.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+winequality_alta_volatile.acidity <- winequality[winequality$quality_disc == "Alta",]$volatile.acidity
+winequality_baja_volatile.acidity <- winequality[winequality$quality_disc == "Baja",]$volatile.acidity
+
+t.test(winequality_alta_volatile.acidity, winequality_baja_volatile.acidity, alternative = "less")
+```
+
+Rechazamos la hipótesis nula (p-value = 2.2e-16 < 0.05), los vinos de calidad **Alta** tienen menor cantidad de **acided volátil** que los vinos de calidad **Baja**.
+
+#### Conclusión 
+
+Los vinos de calidad **Alta** se caracterizán mayoritariamente por tener una **mayor graduación alcohólica**, un **mayor pH** y una **mayor cantidad de sulfitos** que los vinos de calidad **Baja** .Por otra parte también se caracterizan por tener una **menor** cantidad de **chlorides**, **ácido cítrico** y **acided volátil** que los de calidad baja.
+
+### Modelo de regresión lineal
+Vamos a tratar de predecir la calidad del vino en fución a sus características conocidas.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+#Regresores cuantitativos
+acidez = winequality$volatile.acidity
+acido_citrico = winequality$citric.acid
+calorias = winequality$chlorides
+dioxido = winequality$free.sulfur.dioxide
+ph = winequality$pH
+sulfitos = winequality$sulphates
+alcohol = winequality$alcohol
+
+# Variable a predecir
+calidad = winequality$quality
+
+# Generación de varios modelos
+modelo1 <- lm(calidad ~ acidez + acido_citrico + calorias + dioxido +
+              ph + sulfitos + alcohol, data = winequality)
+
+```
+
+Mostramos los resultados del modelo.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Resultado del modelo
+summary(modelo1)
+```
+
+#### Conclusión
+
+El coeficiente de determinación (R2) nos mide la bondad del ajuste. Ha tomado un valor de **0.2585** lejos de **1**, lo que nos indica que este modelo no va a ser bueno para predecir la calidad del vino.
+
+### Modelo de agrupamiento K-Means
+
+En este apartado vamos a tratar de aplicar el modelo de agrupamiento K-Means a nuestro dataframe resultante de los procesos de limpieza y reducción de la dimensionalidad, para tratar de agrupar de manera no supervisada a las distintas mediciones de las características de los vinos blancos. 
+
+Utilazamos el modelo de agrupamiento K-Means para **k = 2,3,4,5,6,7**, elegimos **7** por ser el número de categorías de la variable ***quality*** sin discretizar. Como medida de la calidad del proceso de agregación utilizamos la función silhouette.
+
+Visualizamos los clusters.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+d <- daisy(df) 
+resultados <- rep(0, 10)
+for (i in c(2,3,4,5,6,7))
+{
+  fit           <- kmeans(df, i)
+  y_cluster     <- fit$cluster
+  sk            <- silhouette(y_cluster, d)
+  resultados[i] <- mean(sk[,3])
+}
+```
+
+Mostramos en un gráfica los valores de las siluetas medias de cada prueba para comprobar que número de clústers es el mejor.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+plot(2:7,resultados[2:7],type="o",col="blue",pch=0,xlab="Número de clusters",ylab="Silueta")
+```
+
+A la vista de la gráfica anterior, el número de clusters óptimo sería de 2, con un valor medio de la silueta de 0,57, lo que nos indica que la agrupación no va a ser muy buena.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+ fit           <- kmeans(df, 2)
+  y_cluster     <- fit$cluster
+  sk            <- silhouette(y_cluster, d)
+  resultados[2] <- mean(sk[,3])
+  clusplot(df, fit$cluster, color=TRUE, shade=TRUE, labels=2, lines=0)
+
+```
+
+Fijandonos en el gráfico anterior, no parece que los datos se vayan a poder agrupar en clústers separados.
+
+
+
+#### Conclusión
+
+El método ***k-means*** no nos aporta una agrupación clara para las distintas variables.
+
+# Representación de los resultados a partir de tablas y gráficas
+
+Estas representaciones y gráficas se han ido realizando a lo largo del desarrollo de esta práctica.
+
+# Conclusión final
+Hemos agrupado la varialble **quality** en tres categorías y aplicando técnicas básicas estadísticas como son los contrastes de hipótesis hemos llegado a una caracterización de los vinos de calidad alta y de calidad baja en función de sus propiedades químicas, llgando a la siguiente conclusión:
+
+Los vinos de calidad **Alta** se caracterizán mayoritariamente por tener una **mayor graduación alcohólica**, un **mayor pH** y una **mayor cantidad de sulfitos** que los vinos de calidad **Baja** .Por otra parte también se caracterizan por tener una **menor** cantidad de **chlorides**, **ácido cítrico** y **acided volátil** que los de calidad baja.
+
+Por otra parte, este conjunto de datos no nos ha permitido una agrupación de los vinos blancos en función de sus propiedades químicas utilizando los métodos **K-means** y **regresión**, con estos métodos no podemos clasificar o hacer predicciones para la calidad medida por medios sensoriales a través de las medidas químicas.
+
+
+# Contribuciones al trabajo
+
+| Contribuciones | Contribuciones |
+|-- | -- |
+| Investigación previa | Jorge Miranda Álamo, José Manuel García Rodes |
+| Redacción de las respuestas | Jorge Miranda Álamo, José Manuel García Rodes |
+| Desarrollo código | Jorge Miranda Álamo, José Manuel García Rodes |
+
+
+
